@@ -43,7 +43,13 @@ import {
   Sparkles,
   Scale,
   Activity,
-  Calendar
+  Calendar,
+  LayoutDashboard,
+  CheckSquare,
+  Settings,
+  MessageSquare,
+  History,
+  FileSearch
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -59,6 +65,11 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
+  updateDoc,
+  query,
+  where,
+  onSnapshot,
   handleFirestoreError,
   OperationType
 } from './firebase';
@@ -121,6 +132,11 @@ export default function App() {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<any>(null);
+  const [userRole, setUserRole] = useState<'caseworker' | 'supervisor' | 'admin'>('caseworker');
+  const [currentView, setCurrentView] = useState<'editor' | 'supervisor' | 'admin'>('editor');
+  const [pendingReports, setPendingReports] = useState<any[]>([]);
+  const [agencyTemplates, setAgencyTemplates] = useState<any[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [lastActivity, setLastActivity] = useState(Date.now());
   
@@ -132,30 +148,74 @@ export default function App() {
   // Auth listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setAuthLoading(true);
       if (firebaseUser) {
-        // Update user profile in Firestore
         const userRef = doc(db, 'users', firebaseUser.uid);
         try {
-          await setDoc(userRef, {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName,
-            lastLogin: serverTimestamp()
-          }, { merge: true });
+          const userDoc = await getDoc(userRef);
+          let role = 'caseworker';
+          
+          if (userDoc.exists()) {
+            role = userDoc.data().role || 'caseworker';
+          } else {
+            // Default admin for the main user
+            if (firebaseUser.email === "dain.russell@gmail.com") {
+              role = 'admin';
+            }
+            await setDoc(userRef, {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              displayName: firebaseUser.displayName,
+              role: role,
+              lastLogin: serverTimestamp()
+            }, { merge: true });
+          }
+          
+          setUser(firebaseUser);
+          setUserRole(role as any);
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `users/${firebaseUser.uid}`);
+          handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
         }
-        
-        setUser(firebaseUser);
       } else {
         setUser(null);
+        setUserRole('caseworker');
+        setCurrentView('editor');
       }
       setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  // Auto-logout timer (15 minutes of inactivity)
+  // Fetch pending reports for supervisor
+  useEffect(() => {
+    if (user && userRole === 'supervisor') {
+      const q = query(collection(db, 'reports'), where('status', '==', 'pending'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const reports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setPendingReports(reports);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.GET, 'reports');
+      });
+      return () => unsubscribe();
+    }
+  }, [user, userRole]);
+
+  // Fetch templates
+  useEffect(() => {
+    if (user) {
+      const q = query(collection(db, 'templates'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const templates = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAgencyTemplates(templates);
+        if (templates.length > 0 && !selectedTemplate) {
+          setSelectedTemplate(templates[0]);
+        }
+      }, (err) => {
+        handleFirestoreError(err, OperationType.GET, 'templates');
+      });
+      return () => unsubscribe();
+    }
+  }, [user]);
   useEffect(() => {
     if (!user) return;
 
@@ -360,6 +420,42 @@ export default function App() {
     setTimeout(() => setIsSaving(false), 1500);
   };
 
+  const submitForReview = async () => {
+    if (!validate()) return;
+    if (!user) {
+      setError("You must be signed in to submit for review.");
+      return;
+    }
+
+    setIsSaving(true);
+    const path = 'reports';
+    try {
+      await addDoc(collection(db, path), {
+        title: caseData.reportTitle || `Report - ${new Date().toLocaleDateString()}`,
+        notes: caseData.caseNotes,
+        caseType: caseData.caseType,
+        state: caseData.state,
+        childInfo: caseData.childInfo,
+        status: 'pending',
+        caseworkerId: user.uid,
+        caseworkerEmail: user.email,
+        generatedReport: report || '',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      await logAuditAction('submit_for_review', { title: caseData.reportTitle });
+      alert("Report submitted for supervisor review.");
+      setReport(null);
+      setCaseData(prev => ({ ...prev, caseNotes: '', reportTitle: '' }));
+      localStorage.removeItem('cps_report_draft');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleInputChange = (
     e: React.ChangeEvent<HTMLTextAreaElement | HTMLSelectElement | HTMLInputElement>
   ) => {
@@ -497,7 +593,9 @@ export default function App() {
           }
         ],
         config: {
-          systemInstruction: `You are a Child Welfare AI Assistant, called "Child Welfare Copilot". 
+          systemInstruction: selectedTemplate 
+            ? selectedTemplate.systemInstruction 
+            : `You are a Child Welfare AI Assistant, called "Child Welfare Copilot". 
 Your role is to help CPS caseworkers and supervisors create accurate, compliant, and structured case documentation, generate court reports, flag risk and missing information, and suggest family support resources.
 
 ADVANCED CAPABILITIES:
@@ -726,6 +824,36 @@ AI TASKS / WORKFLOW:
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <nav className="hidden md:flex items-center gap-1 bg-gray-100 p-1 rounded-xl mr-4">
+              <button 
+                onClick={() => setCurrentView('editor')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${currentView === 'editor' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                <FileSearch className="w-3.5 h-3.5" />
+                Editor
+              </button>
+              {(userRole === 'supervisor' || userRole === 'admin') && (
+                <button 
+                  onClick={() => setCurrentView('supervisor')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${currentView === 'supervisor' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <LayoutDashboard className="w-3.5 h-3.5" />
+                  Dashboard
+                  {pendingReports.length > 0 && (
+                    <span className="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full">{pendingReports.length}</span>
+                  )}
+                </button>
+              )}
+              {userRole === 'admin' && (
+                <button 
+                  onClick={() => setCurrentView('admin')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${currentView === 'admin' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  Templates
+                </button>
+              )}
+            </nav>
             <div className="hidden md:flex items-center gap-3 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100">
               <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center overflow-hidden">
                 {user.photoURL ? (
@@ -755,7 +883,8 @@ AI TASKS / WORKFLOW:
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {currentView === 'editor' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
           {/* Input Section */}
           <div className="lg:col-span-5 space-y-6">
@@ -1118,6 +1247,15 @@ AI TASKS / WORKFLOW:
                       </>
                     )}
                   </button>
+
+                  <button
+                    onClick={submitForReview}
+                    disabled={isSaving || isGenerating}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2.5 rounded-xl shadow-lg shadow-blue-600/10 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    Submit for Supervisor Review
+                  </button>
                 </div>
               </div>
             </section>
@@ -1256,6 +1394,21 @@ AI TASKS / WORKFLOW:
             </AnimatePresence>
           </div>
         </div>
+        )}
+
+        {currentView === 'supervisor' && (
+          <SupervisorDashboard 
+            pendingReports={pendingReports} 
+            user={user} 
+          />
+        )}
+
+        {currentView === 'admin' && (
+          <AdminSettings 
+            agencyTemplates={agencyTemplates} 
+            user={user} 
+          />
+        )}
       </main>
       
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 border-t border-black/5 mt-8">
@@ -1268,6 +1421,223 @@ AI TASKS / WORKFLOW:
           </div>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// --- Sub-Components ---
+
+function SupervisorDashboard({ pendingReports, user }: { pendingReports: any[], user: any }) {
+  const [selectedReport, setSelectedReport] = useState<any>(null);
+  const [comments, setComments] = useState('');
+
+  const handleAction = async (reportId: string, status: 'approved' | 'rejected') => {
+    const path = 'reports';
+    try {
+      await updateDoc(doc(db, path, reportId), {
+        status,
+        supervisorComments: comments,
+        supervisorId: user.uid,
+        updatedAt: serverTimestamp()
+      });
+      alert(`Report ${status} successfully.`);
+      setSelectedReport(null);
+      setComments('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `${path}/${reportId}`);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <LayoutDashboard className="w-6 h-6 text-emerald-600" />
+          Supervisor Review Queue
+        </h2>
+        <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
+          {pendingReports.length} Pending Reviews
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-4 space-y-4">
+          {pendingReports.length === 0 ? (
+            <div className="bg-white p-8 rounded-2xl border border-dashed border-gray-200 text-center">
+              <CheckCircle2 className="w-10 h-10 text-emerald-200 mx-auto mb-2" />
+              <p className="text-gray-500 text-sm">All caught up! No reports pending review.</p>
+            </div>
+          ) : (
+            pendingReports.map(report => (
+              <button
+                key={report.id}
+                onClick={() => setSelectedReport(report)}
+                className={`w-full text-left p-4 rounded-2xl border transition-all ${selectedReport?.id === report.id ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-black/5 hover:border-emerald-200'}`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">{report.caseType}</span>
+                  <span className="text-[10px] text-gray-400">{report.createdAt?.toDate() ? new Date(report.createdAt.toDate()).toLocaleDateString() : 'Recent'}</span>
+                </div>
+                <h3 className="font-bold text-gray-800 mb-1">{report.title}</h3>
+                <p className="text-xs text-gray-500 line-clamp-1">By: {report.caseworkerEmail}</p>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="lg:col-span-8">
+          {selectedReport ? (
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="bg-white rounded-2xl shadow-sm border border-black/5 overflow-hidden"
+            >
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                <div>
+                  <h3 className="text-xl font-bold">{selectedReport.title}</h3>
+                  <p className="text-sm text-gray-500">Submitted by {selectedReport.caseworkerEmail}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleAction(selectedReport.id, 'rejected')}
+                    className="px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-all"
+                  >
+                    Request Changes
+                  </button>
+                  <button 
+                    onClick={() => handleAction(selectedReport.id, 'approved')}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200"
+                  >
+                    Approve Report
+                  </button>
+                </div>
+              </div>
+              <div className="p-6 space-y-6">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Supervisor Comments</label>
+                  <textarea 
+                    value={comments}
+                    onChange={(e) => setComments(e.target.value)}
+                    placeholder="Add feedback or instructions for the caseworker..."
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    rows={3}
+                  />
+                </div>
+                <div className="prose prose-sm max-w-none">
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Generated Report Content</label>
+                  <div className="bg-gray-50 rounded-xl p-6 border border-gray-100">
+                    <ReactMarkdown>{selectedReport.generatedReport}</ReactMarkdown>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Original Case Notes</label>
+                  <p className="text-sm text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-100 italic">
+                    {selectedReport.notes}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center p-12 text-center h-full min-h-[400px]">
+              <FileSearch className="w-12 h-12 text-gray-200 mb-4" />
+              <h3 className="text-lg font-medium text-gray-400">Select a report to review</h3>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminSettings({ agencyTemplates, user }: { agencyTemplates: any[], user: any }) {
+  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', systemInstruction: '' });
+  const [isAdding, setIsAdding] = useState(false);
+
+  const handleAddTemplate = async () => {
+    if (!newTemplate.name || !newTemplate.systemInstruction) return;
+    const path = 'templates';
+    try {
+      await addDoc(collection(db, path), {
+        ...newTemplate,
+        createdBy: user.uid,
+        createdAt: serverTimestamp()
+      });
+      alert("Template saved successfully.");
+      setNewTemplate({ name: '', description: '', systemInstruction: '' });
+      setIsAdding(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Settings className="w-6 h-6 text-emerald-600" />
+          Agency Template Manager
+        </h2>
+        <button 
+          onClick={() => setIsAdding(!isAdding)}
+          className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all"
+        >
+          {isAdding ? 'Cancel' : 'Create New Template'}
+        </button>
+      </div>
+
+      {isAdding && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-200 space-y-4"
+        >
+          <h3 className="font-bold text-emerald-700">New Agency Template</h3>
+          <div className="grid grid-cols-1 gap-4">
+            <input 
+              type="text" 
+              placeholder="Template Name (e.g., Hamilton County Court Format)"
+              value={newTemplate.name}
+              onChange={(e) => setNewTemplate({...newTemplate, name: e.target.value})}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+            />
+            <input 
+              type="text" 
+              placeholder="Brief Description"
+              value={newTemplate.description}
+              onChange={(e) => setNewTemplate({...newTemplate, description: e.target.value})}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+            />
+            <textarea 
+              placeholder="System Instructions (The 'brain' of the AI for this template)..."
+              value={newTemplate.systemInstruction}
+              onChange={(e) => setNewTemplate({...newTemplate, systemInstruction: e.target.value})}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none h-48"
+            />
+          </div>
+          <button 
+            onClick={handleAddTemplate}
+            className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-100"
+          >
+            Save Template to Agency Library
+          </button>
+        </motion.div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {agencyTemplates.map(template => (
+          <div key={template.id} className="bg-white p-6 rounded-2xl border border-black/5 shadow-sm hover:border-emerald-200 transition-all group">
+            <div className="flex justify-between items-start mb-2">
+              <h3 className="font-bold text-gray-800">{template.name}</h3>
+              <span className="text-[10px] bg-gray-100 px-2 py-1 rounded-md text-gray-500 font-bold uppercase">Active</span>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">{template.description}</p>
+            <div className="pt-4 border-t border-gray-50 flex justify-between items-center">
+              <span className="text-[10px] text-gray-400">Created {template.createdAt?.toDate() ? new Date(template.createdAt.toDate()).toLocaleDateString() : 'Recent'}</span>
+              <button className="text-emerald-600 text-xs font-bold opacity-0 group-hover:opacity-100 transition-all">Edit Template</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

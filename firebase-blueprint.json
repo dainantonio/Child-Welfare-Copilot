@@ -22,10 +22,44 @@
         "uid": { "type": "string" },
         "email": { "type": "string" },
         "displayName": { "type": "string" },
-        "role": { "type": "string", "enum": ["caseworker", "admin"] },
+        "role": { "type": "string", "enum": ["caseworker", "supervisor", "admin"] },
         "lastLogin": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "A case report draft or official document.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "notes": { "type": "string" },
+        "caseType": { "type": "string" },
+        "state": { "type": "string" },
+        "childInfo": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "pending", "approved", "rejected"] },
+        "caseworkerId": { "type": "string" },
+        "caseworkerEmail": { "type": "string" },
+        "supervisorId": { "type": "string" },
+        "supervisorComments": { "type": "string" },
+        "generatedReport": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "status", "caseworkerId", "createdAt"]
+    },
+    "Template": {
+      "title": "Template",
+      "description": "Agency-specific prompt templates.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "systemInstruction": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "systemInstruction", "createdBy", "createdAt"]
     }
   },
   "firestore": {
@@ -36,6 +70,14 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Caseworker profiles."
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Case reports and drafts."
+    },
+    "/templates/{templateId}": {
+      "schema": "Template",
+      "description": "Custom prompt templates."
     }
   }
 }

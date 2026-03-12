@@ -8,8 +8,31 @@
 //   - uid: string (required) - User's unique ID
 //   - email: string (required) - User's email address
 //   - displayName: string (optional) - User's name
-//   - role: string (optional) - 'admin' or 'caseworker'
+//   - role: string (optional) - 'admin', 'supervisor', or 'caseworker'
 //   - lastLogin: timestamp (optional) - Last login time
+//
+// Collection: reports
+// Document ID: auto-generated
+// Fields:
+//   - title: string (required)
+//   - notes: string (optional)
+//   - caseType: string (optional)
+//   - state: string (optional)
+//   - status: string (required) - 'draft', 'pending', 'approved', 'rejected'
+//   - caseworkerId: string (required)
+//   - caseworkerEmail: string (optional)
+//   - supervisorId: string (optional)
+//   - supervisorComments: string (optional)
+//   - generatedReport: string (optional)
+//   - createdAt: timestamp (required)
+//   - updatedAt: timestamp (required)
+//
+// Collection: templates
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required)
+//   - systemInstruction: string (required)
+//   - createdBy: string (required)
 //
 // Collection: auditLogs
 // Document ID: auto-generated
@@ -39,6 +62,11 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isSupervisor() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor';
+    }
+
     function isAdmin() {
       return isAuthenticated() && 
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
@@ -49,7 +77,22 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email']) &&
              data.uid is string &&
              data.email is string &&
-             (!('role' in data) || data.role in ['admin', 'caseworker']);
+             (!('role' in data) || data.role in ['admin', 'supervisor', 'caseworker']);
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['title', 'status', 'caseworkerId', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.status in ['draft', 'pending', 'approved', 'rejected'] &&
+             data.caseworkerId is string &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidTemplate(data) {
+      return data.keys().hasAll(['name', 'systemInstruction', 'createdBy']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.systemInstruction is string && data.systemInstruction.size() > 0;
     }
 
     function isValidAuditLog(data) {
@@ -75,9 +118,33 @@ service cloud.firestore {
 
     // Audit Logs
     match /auditLogs/{logId} {
-      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid) || isSupervisor();
       allow create: if isAuthenticated() && isValidAuditLog(request.resource.data);
-      allow update, delete: if false; // Audit logs are immutable
+      allow update, delete: if false;
+    }
+
+    // Reports
+    match /reports/{reportId} {
+      allow read: if isAdmin() || isSupervisor() || (isAuthenticated() && resource.data.caseworkerId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidReport(request.resource.data) && request.resource.data.caseworkerId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        // Caseworker can update their own draft/rejected reports
+        (resource.data.caseworkerId == request.auth.uid && 
+         (resource.data.status == 'draft' || resource.data.status == 'rejected') &&
+         isValidReport(request.resource.data) &&
+         request.resource.data.caseworkerId == resource.data.caseworkerId) ||
+        // Supervisor can update status and comments
+        (isSupervisor() && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'supervisorComments', 'supervisorId', 'updatedAt'])) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Templates
+    match /templates/{templateId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     // Default Deny
