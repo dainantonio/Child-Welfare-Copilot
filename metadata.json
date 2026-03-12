@@ -1,0 +1,5 @@
+{
+  "name": "Child Welfare Copilot",
+  "description": "AI-powered assistant for CPS caseworkers to generate structured, compliant case documentation and court reports.",
+  "requestFramePermissions": []
+}

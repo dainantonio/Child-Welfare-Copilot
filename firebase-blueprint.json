@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Records of report generation for compliance and auditing.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the caseworker." },
+        "userEmail": { "type": "string", "description": "Email of the caseworker." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the report was generated." },
+        "caseType": { "type": "string", "description": "Type of case processed." },
+        "reportTitle": { "type": "string", "description": "Title of the report generated." },
+        "action": { "type": "string", "description": "The action performed (e.g., 'generate_report')." }
+      },
+      "required": ["userId", "timestamp", "action"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Caseworker profile and settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["caseworker", "admin"] },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Collection of audit logs."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Caseworker profiles."
+    }
+  }
+}

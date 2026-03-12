@@ -1,0 +1,88 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: userId (Firebase Auth UID)
+// Fields:
+//   - uid: string (required) - User's unique ID
+//   - email: string (required) - User's email address
+//   - displayName: string (optional) - User's name
+//   - role: string (optional) - 'admin' or 'caseworker'
+//   - lastLogin: timestamp (optional) - Last login time
+//
+// Collection: auditLogs
+// Document ID: auto-generated
+// Fields:
+//   - userId: string (required) - UID of the caseworker
+//   - userEmail: string (optional) - Email of the caseworker
+//   - timestamp: timestamp (required) - When the action occurred
+//   - action: string (required) - Type of action (e.g., 'generate_report')
+//   - caseType: string (optional) - Type of case
+//   - reportTitle: string (optional) - Title of report
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "dain.russell@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string &&
+             data.email is string &&
+             (!('role' in data) || data.role in ['admin', 'caseworker']);
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['userId', 'timestamp', 'action']) &&
+             data.userId == request.auth.uid &&
+             data.timestamp == request.time &&
+             data.action is string &&
+             data.action.size() < 100;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // User Profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    (!('role' in request.resource.data) || request.resource.data.role == 'caseworker' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    // Audit Logs
+    match /auditLogs/{logId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidAuditLog(request.resource.data);
+      allow update, delete: if false; // Audit logs are immutable
+    }
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
