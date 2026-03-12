@@ -81,6 +81,7 @@ interface CaseData {
   caseNotes: string;
   caseType: CaseType;
   childInfo: string;
+  state: string;
   supervisorMode: boolean;
   outputFormat: OutputFormat;
   attachments: AttachedFile[];
@@ -102,6 +103,7 @@ export default function App() {
     caseNotes: '',
     caseType: 'Investigation',
     childInfo: '',
+    state: 'Ohio',
     supervisorMode: false,
     outputFormat: 'Plain Text',
     attachments: [],
@@ -196,6 +198,7 @@ export default function App() {
         caseNotes: '',
         caseType: 'Investigation',
         childInfo: '',
+        state: 'Ohio',
         supervisorMode: false,
         outputFormat: 'Plain Text',
         attachments: [],
@@ -232,6 +235,7 @@ export default function App() {
         setCaseData(prev => ({
           ...prev,
           ...parsed,
+          state: parsed.state || 'Ohio',
           attachments: parsed.attachments || []
         }));
         if (parsed.caseNotes) {
@@ -315,6 +319,7 @@ export default function App() {
       caseNotes: `Home visit conducted on 03/12/2026. Observed three children (ages 4, 6, 8) in the home. The home was cluttered with trash and old food. Mother (Sarah Johnson) appeared lethargic and had difficulty focusing on questions. Children appeared thin but were appropriately dressed for the weather. 6-year-old reported they haven't had a "hot meal" in two days. Sarah admitted to struggling with depression and lack of support since her partner left. No immediate signs of physical abuse, but severe environmental neglect is evident. Safety plan discussed but Sarah was hesitant to sign.`,
       caseType: 'Investigation',
       childInfo: 'Aria (8), Leo (6), Mia (4)',
+      state: 'Ohio',
       supervisorMode: false,
       outputFormat: 'Plain Text',
       attachments: [],
@@ -498,7 +503,7 @@ Your role is to help CPS caseworkers and supervisors create accurate, compliant,
 ADVANCED CAPABILITIES:
 1. Quantitative Risk Scoring: Calculate a "Risk Matrix Score" (1-10) based on keywords like substance use, prior history, domestic violence, and environmental neglect. Provide a brief justification for the score.
 2. Timeline Generator: Extract all dates/times from the notes and images to create a "Chronological Timeline of Events" section.
-3. Statute/Policy Referencing: Automatically cite relevant state laws, specifically focusing on the Ohio Revised Code (ORC) sections (e.g., ORC 2151.03 for neglected child, ORC 2151.031 for abused child) based on the allegations described.
+3. Statute/Policy Referencing: Automatically cite relevant state laws based on the allegations described. Use the specific statutes and codes for the selected state: ${caseData.state}. (e.g., if Ohio is selected, use Ohio Revised Code; if California is selected, use California Welfare and Institutions Code, etc.).
 
 IMPORTANT PRIVACY NOTICE: The input text has been redacted to protect PII. You will see placeholders like [PERSON_1], [SSN_1], [PHONE_1]. Maintain these placeholders exactly in your output. Do not attempt to guess or hallucinate the original values.
 
@@ -554,6 +559,7 @@ MULTIMODAL INSTRUCTIONS:
 ${titleLine}USER INPUT VARIABLES:
 - Case Notes: ${data.caseNotes}
 - Case Type: ${data.caseType}
+- State/Jurisdiction: ${data.state}
 - Child & Family Info: ${data.childInfo || "Not provided"}
 - Supervisor Review Mode: ${data.supervisorMode}
 - Requested Output Format: ${data.outputFormat}
@@ -565,7 +571,7 @@ AI TASKS / WORKFLOW:
 1. Summarize Case Notes: Extract key facts and identify risk indicators.
 2. Quantitative Risk Assessment: Generate a "Risk Matrix Score" with justification.
 3. Chronological Timeline: Extract and list all events with dates/times in order.
-4. Statute Referencing: Cite relevant Ohio Revised Code (ORC) sections based on the case details.
+4. Statute Referencing: Cite relevant statutes and legal codes for the state of ${data.state} based on the case details.
 5. Generate Structured Report: Include Background, Allegations, Investigation Summary, Safety Assessment, Actions Taken, and Recommendations.
 6. Supervisor Review / QA: If Supervisor Review Mode is true, highlight missing sections and flag high-risk issues.
 7. Family Services Recommendation: Suggest evidence-based programs.
@@ -850,6 +856,30 @@ AI TASKS / WORKFLOW:
                   {fieldErrors.caseType && (
                     <p className="mt-1 text-xs text-red-600 font-medium">{fieldErrors.caseType}</p>
                   )}
+                </div>
+
+                {/* State/Jurisdiction */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    State / Jurisdiction
+                  </label>
+                  <select
+                    name="state"
+                    value={caseData.state}
+                    onChange={handleInputChange}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                  >
+                    {[
+                      'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'District of Columbia',
+                      'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine',
+                      'Maryland', 'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+                      'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+                      'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia',
+                      'Washington', 'West Virginia', 'Wisconsin', 'Wyoming'
+                    ].map(state => (
+                      <option key={state} value={state}>{state}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Child & Family Info */}
