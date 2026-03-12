@@ -39,7 +39,11 @@ import {
   Image as ImageIcon,
   X,
   ExternalLink,
-  Zap
+  Zap,
+  Sparkles,
+  Scale,
+  Activity,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -491,6 +495,11 @@ export default function App() {
           systemInstruction: `You are a Child Welfare AI Assistant, called "Child Welfare Copilot". 
 Your role is to help CPS caseworkers and supervisors create accurate, compliant, and structured case documentation, generate court reports, flag risk and missing information, and suggest family support resources.
 
+ADVANCED CAPABILITIES:
+1. Quantitative Risk Scoring: Calculate a "Risk Matrix Score" (1-10) based on keywords like substance use, prior history, domestic violence, and environmental neglect. Provide a brief justification for the score.
+2. Timeline Generator: Extract all dates/times from the notes and images to create a "Chronological Timeline of Events" section.
+3. Statute/Policy Referencing: Automatically cite relevant state laws, specifically focusing on the Ohio Revised Code (ORC) sections (e.g., ORC 2151.03 for neglected child, ORC 2151.031 for abused child) based on the allegations described.
+
 IMPORTANT PRIVACY NOTICE: The input text has been redacted to protect PII. You will see placeholders like [PERSON_1], [SSN_1], [PHONE_1]. Maintain these placeholders exactly in your output. Do not attempt to guess or hallucinate the original values.
 
 MULTIMODAL INSTRUCTIONS:
@@ -554,10 +563,13 @@ ${formatInstruction}
 
 AI TASKS / WORKFLOW:
 1. Summarize Case Notes: Extract key facts and identify risk indicators.
-2. Generate Structured Report: Include Background, Allegations, Investigation Summary, Safety Assessment, Actions Taken, and Recommendations.
-3. Supervisor Review / QA: If Supervisor Review Mode is true, highlight missing sections and flag high-risk issues.
-4. Family Services Recommendation: Suggest evidence-based programs.
-5. Output Formatting: Use clear headings and bullet points.
+2. Quantitative Risk Assessment: Generate a "Risk Matrix Score" with justification.
+3. Chronological Timeline: Extract and list all events with dates/times in order.
+4. Statute Referencing: Cite relevant Ohio Revised Code (ORC) sections based on the case details.
+5. Generate Structured Report: Include Background, Allegations, Investigation Summary, Safety Assessment, Actions Taken, and Recommendations.
+6. Supervisor Review / QA: If Supervisor Review Mode is true, highlight missing sections and flag high-risk issues.
+7. Family Services Recommendation: Suggest evidence-based programs.
+8. Output Formatting: Use clear headings and bullet points.
 `;
   };
 
@@ -1005,6 +1017,26 @@ AI TASKS / WORKFLOW:
                       >
                         {format}
                       </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Advanced AI Features Info */}
+                <div className="pt-4 border-t border-gray-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Sparkles className="w-4 h-4 text-purple-600" />
+                    <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">Advanced AI Active</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {[
+                      { icon: Scale, label: 'Statute Referencing (ORC)', color: 'text-blue-600', bg: 'bg-blue-50' },
+                      { icon: Activity, label: 'Quantitative Risk Scoring', color: 'text-red-600', bg: 'bg-red-50' },
+                      { icon: Calendar, label: 'Automated Timeline Generator', color: 'text-purple-600', bg: 'bg-purple-50' },
+                    ].map((feature, idx) => (
+                      <div key={idx} className={`flex items-center gap-2 px-3 py-2 rounded-xl ${feature.bg} border border-black/5`}>
+                        <feature.icon className={`w-3.5 h-3.5 ${feature.color}`} />
+                        <span className="text-[10px] font-semibold text-gray-600">{feature.label}</span>
+                      </div>
                     ))}
                   </div>
                 </div>
