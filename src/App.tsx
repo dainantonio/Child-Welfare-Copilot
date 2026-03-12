@@ -33,7 +33,13 @@ import {
   User,
   Lock,
   ShieldAlert,
-  LogIn
+  LogIn,
+  Upload,
+  FileAudio,
+  Image as ImageIcon,
+  X,
+  ExternalLink,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -73,6 +79,15 @@ interface CaseData {
   childInfo: string;
   supervisorMode: boolean;
   outputFormat: OutputFormat;
+  attachments: AttachedFile[];
+}
+
+interface AttachedFile {
+  id: string;
+  file: File;
+  type: 'image' | 'audio';
+  previewUrl: string;
+  base64?: string;
 }
 
 // --- App Component ---
@@ -85,6 +100,7 @@ export default function App() {
     childInfo: '',
     supervisorMode: false,
     outputFormat: 'Plain Text',
+    attachments: [],
   });
 
   const [report, setReport] = useState<string | null>(null);
@@ -178,6 +194,7 @@ export default function App() {
         childInfo: '',
         supervisorMode: false,
         outputFormat: 'Plain Text',
+        attachments: [],
       });
       setReport('');
     } catch (err) {
@@ -207,8 +224,15 @@ export default function App() {
     if (savedDraft) {
       try {
         const parsed = JSON.parse(savedDraft);
-        setCaseData(parsed);
-        setHistory([parsed.caseNotes]);
+        // Ensure all required fields exist, especially attachments which might be missing in older drafts
+        setCaseData(prev => ({
+          ...prev,
+          ...parsed,
+          attachments: parsed.attachments || []
+        }));
+        if (parsed.caseNotes) {
+          setHistory([parsed.caseNotes]);
+        }
       } catch (err) {
         console.error("Failed to parse saved draft", err);
       }
@@ -223,6 +247,7 @@ export default function App() {
       recognitionRef.current.lang = 'en-US';
 
       recognitionRef.current.onresult = (event: any) => {
+        if (!event.results) return;
         let interimTranscript = '';
         let finalTranscript = '';
 
@@ -288,6 +313,7 @@ export default function App() {
       childInfo: 'Aria (8), Leo (6), Mia (4)',
       supervisorMode: false,
       outputFormat: 'Plain Text',
+      attachments: [],
     };
     setCaseData(example);
     addToHistory(example.caseNotes);
@@ -369,6 +395,55 @@ export default function App() {
     return Object.keys(errors).length === 0;
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newAttachments: AttachedFile[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isImage = file.type.startsWith('image/');
+      const isAudio = file.type.startsWith('audio/') || file.name.endsWith('.m4a');
+      
+      if (!isImage && !isAudio) {
+        setError("Unsupported file type. Please upload images or audio files.");
+        continue;
+      }
+
+      const base64 = await fileToBase64(file);
+      
+      newAttachments.push({
+        id: Math.random().toString(36).substr(2, 9),
+        file,
+        type: isImage ? 'image' : 'audio',
+        previewUrl: isImage ? URL.createObjectURL(file) : '',
+        base64: base64.split(',')[1] // Remove data:mime/type;base64,
+      });
+    }
+
+    setCaseData(prev => ({
+      ...prev,
+      attachments: [...(prev.attachments || []), ...newAttachments]
+    }));
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const removeAttachment = (id: string) => {
+    setCaseData(prev => ({
+      ...prev,
+      attachments: (prev.attachments || []).filter(a => a.id !== id)
+    }));
+  };
+
   const generateReport = async () => {
     if (!validate()) {
       setError("Please fix the errors in the form before generating.");
@@ -388,12 +463,28 @@ export default function App() {
       const redactedData = { ...caseData, caseNotes: finalRedactedNotes };
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+      
+      // Prepare multimodal parts
+      const parts: any[] = [
+        { text: constructPrompt(redactedData) }
+      ];
+
+      // Add attachments
+      (caseData.attachments || []).forEach(attr => {
+        parts.push({
+          inlineData: {
+            mimeType: attr.file.type || (attr.file.name.endsWith('.m4a') ? 'audio/mp4' : 'application/octet-stream'),
+            data: attr.base64
+          }
+        });
+      });
+
       const model = ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: [
           {
             role: "user",
-            parts: [{ text: constructPrompt(redactedData) }]
+            parts: parts
           }
         ],
         config: {
@@ -402,12 +493,10 @@ Your role is to help CPS caseworkers and supervisors create accurate, compliant,
 
 IMPORTANT PRIVACY NOTICE: The input text has been redacted to protect PII. You will see placeholders like [PERSON_1], [SSN_1], [PHONE_1]. Maintain these placeholders exactly in your output. Do not attempt to guess or hallucinate the original values.
 
-You must always:
-1. Use formal, professional language suitable for courts and supervisors.
-2. Follow West Virginia / Cabell County CPS reporting standards unless otherwise specified.
-3. Include all required sections: Background, Allegations, Investigation Summary, Safety Assessment, Actions Taken, Recommendations.
-4. Highlight any missing mandatory information or potential policy compliance issues.
-5. Suggest evidence-based family services if requested.`,
+MULTIMODAL INSTRUCTIONS:
+1. If images are provided (e.g., photos of notes, police reports, medical docs), extract all relevant facts, dates, and names into the report. Redact any new names found in images using the [PERSON_X] pattern.
+2. If audio is provided (e.g., interview recordings), transcribe the key points and summarize the dialogue. Redact any PII mentioned in the audio.
+3. Integrate all information from text, images, and audio into a single, cohesive, professional report.`,
         }
       });
 
@@ -652,6 +741,55 @@ AI TASKS / WORKFLOW:
           
           {/* Input Section */}
           <div className="lg:col-span-5 space-y-6">
+            {/* Workflow Integration Card */}
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-white rounded-3xl shadow-sm border border-black/5 p-8 space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-600 p-2 rounded-lg">
+                    <Zap className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-lg font-bold tracking-tight">Workflow Integration</h2>
+                </div>
+                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-full uppercase tracking-wider">
+                  SACWIS/CCWIS Bridge
+                </span>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-sm text-gray-500 leading-relaxed">
+                  Connect your generated reports directly to the state web portal. Use the browser extension to auto-fill fields.
+                </p>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => {
+                      if (report) {
+                        navigator.clipboard.writeText(report);
+                        alert("Report copied to extension bridge. Ready for auto-fill in SACWIS/CCWIS.");
+                      }
+                    }}
+                    disabled={!report}
+                    className="flex items-center justify-center gap-2 py-3 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Push to State Portal
+                  </button>
+                  <a 
+                    href="#" 
+                    className="flex items-center justify-center gap-2 py-3 bg-white border border-black/5 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    Get Extension
+                  </a>
+                </div>
+              </div>
+            </motion.div>
+
             <section className="bg-white rounded-2xl shadow-sm border border-black/5 p-6 space-y-6">
               <div className="flex items-center gap-2 mb-2">
                 <ClipboardList className="w-5 h-5 text-emerald-600" />
@@ -766,12 +904,65 @@ AI TASKS / WORKFLOW:
                           : 'border-gray-200 focus:ring-emerald-500/20 focus:border-emerald-500'
                       }`}
                     />
-                    <div className="absolute bottom-3 right-3 flex items-center gap-3 text-[10px] font-medium text-gray-400 bg-white/80 backdrop-blur-sm px-2 py-1 rounded-md border border-gray-100">
-                      <span>{wordCount} Words</span>
-                      <span className="w-px h-2 bg-gray-200" />
-                      <span>{charCount} Characters</span>
+                    
+                    {/* Multimodal Uploads */}
+                    <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                      <div className="flex items-center gap-2 text-[10px] font-medium text-gray-400 bg-white/80 backdrop-blur-sm px-2 py-1 rounded-md border border-gray-100">
+                        <span>{wordCount} Words</span>
+                        <span className="w-px h-2 bg-gray-200" />
+                        <span>{charCount} Characters</span>
+                      </div>
+                      
+                      <label className="cursor-pointer p-1.5 bg-white rounded-lg shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors text-gray-500 hover:text-emerald-600" title="Upload Audio/Images">
+                        <Upload className="w-3.5 h-3.5" />
+                        <input 
+                          type="file" 
+                          className="hidden" 
+                          multiple 
+                          accept="image/*,audio/*,.m4a"
+                          onChange={handleFileUpload}
+                        />
+                      </label>
                     </div>
                   </div>
+
+                  {/* Attachments Preview */}
+                  <AnimatePresence>
+                    {(caseData.attachments || []).length > 0 && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="flex flex-wrap gap-2 pt-2"
+                      >
+                        {(caseData.attachments || []).map((attr) => (
+                          <div key={attr.id} className="relative group">
+                            <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 pr-6 shadow-sm">
+                              {attr.type === 'image' ? (
+                                <div className="w-6 h-6 rounded-md overflow-hidden border border-gray-100">
+                                  <img src={attr.previewUrl} alt="" className="w-full h-full object-cover" />
+                                </div>
+                              ) : (
+                                <div className="w-6 h-6 bg-blue-50 rounded-md flex items-center justify-center">
+                                  <FileAudio className="w-3 h-3 text-blue-600" />
+                                </div>
+                              )}
+                              <div className="flex flex-col">
+                                <span className="text-[9px] font-bold text-gray-700 truncate max-w-[80px]">{attr.file.name}</span>
+                                <span className="text-[7px] text-gray-400 uppercase font-bold">{attr.type}</span>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => removeAttachment(attr.id)}
+                              className="absolute top-0.5 right-0.5 p-0.5 bg-white rounded-full shadow-sm border border-gray-100 text-gray-400 hover:text-red-600 transition-colors"
+                            >
+                              <X className="w-2 h-2" />
+                            </button>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   {fieldErrors.caseNotes && (
                     <p className="mt-1 text-xs text-red-600 font-medium">{fieldErrors.caseNotes}</p>
                   )}
