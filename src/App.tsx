@@ -25,8 +25,6 @@ import {
   RotateCcw,
   RotateCw,
   FileJson,
-  ChevronDown,
-  ChevronUp,
   Copy,
   FileDown,
   LogOut,
@@ -135,7 +133,6 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [history, setHistory] = useState<string[]>(['']);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState<'caseworker' | 'supervisor' | 'admin'>('caseworker');
   const [currentView, setCurrentView] = useState<'editor' | 'supervisor' | 'admin'>('editor');
@@ -448,7 +445,6 @@ export default function App() {
     };
     setCaseData(example);
     setReport(null);
-    setExpandedSections({});
     addToHistory(example.caseNotes);
     setError(null);
     setFieldErrors({});
@@ -787,37 +783,6 @@ AI TASKS / WORKFLOW:
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
-  };
-
-  const parseReportSections = (text: string) => {
-    const sections: { title: string; content: string }[] = [];
-    const lines = text.split('\n');
-    let currentSection: { title: string; content: string } | null = null;
-
-    lines.forEach(line => {
-      if (line.startsWith('# ') || line.startsWith('## ') || line.startsWith('### ')) {
-        if (currentSection) sections.push(currentSection);
-        currentSection = { 
-          title: line.replace(/^#+\s+/, ''), 
-          content: '' 
-        };
-      } else if (currentSection) {
-        currentSection.content += line + '\n';
-      } else if (line.trim()) {
-        // Handle content before first header
-        currentSection = { title: 'Introduction', content: line + '\n' };
-      }
-    });
-
-    if (currentSection) sections.push(currentSection);
-    return sections;
-  };
-
-  const toggleSection = (title: string) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [title]: !prev[title]
-    }));
   };
 
   const wordCount = caseData.caseNotes.trim() ? caseData.caseNotes.trim().split(/\s+/).length : 0;
@@ -1457,23 +1422,11 @@ AI TASKS / WORKFLOW:
                     className="p-8 overflow-y-auto prose prose-sm max-w-none prose-emerald prose-headings:font-semibold prose-headings:tracking-tight prose-p:text-gray-700 prose-li:text-gray-700 flex-grow"
                   >
                     <div className="space-y-4 print:space-y-8">
-                      {parseReportSections(report).map((section, idx) => (
-                        <div key={idx} className="border border-gray-100 rounded-xl overflow-hidden print:border-none print:rounded-none">
-                          <button 
-                            onClick={() => toggleSection(section.title)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left print:hidden"
-                          >
-                            <span className="font-semibold text-gray-900">{section.title}</span>
-                            {expandedSections[section.title] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          </button>
-                          <div className={`p-4 print:block ${expandedSections[section.title] || idx === 0 ? 'block' : 'hidden'}`}>
-                            {idx === 0 && !report.startsWith('#') && (
-                              <h2 className="text-xl font-bold mb-4 print:block hidden">{section.title}</h2>
-                            )}
-                            <ReactMarkdown>{section.content}</ReactMarkdown>
-                          </div>
+                      <div className="border border-gray-100 rounded-xl overflow-hidden print:border-none print:rounded-none">
+                        <div className="p-4">
+                          <ReactMarkdown>{report}</ReactMarkdown>
                         </div>
-                      ))}
+                      </div>
                     </div>
                   </div>
 
