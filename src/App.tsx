@@ -276,6 +276,11 @@ export default function App() {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error("Login error:", err);
+      const errorCode = (err as { code?: string })?.code;
+      if (errorCode === 'auth/unauthorized-domain') {
+        setError('Google sign-in is not enabled for this domain yet. Add this domain in Firebase Console → Authentication → Settings → Authorized domains.');
+        return;
+      }
       setError("Failed to sign in. Please try again.");
     }
   };
@@ -615,6 +620,11 @@ export default function App() {
     setError(null);
 
     try {
+      const geminiApiKey = process.env.GEMINI_API_KEY || '';
+      if (!geminiApiKey) {
+        throw new Error('GEMINI_API_KEY is not configured.');
+      }
+
       // 1. PII Redaction (Local)
       const entitiesToRedact = caseData.childInfo.split(',').map(e => e.trim());
       const { redactedText: redactedNotes, map: notesMap } = piiService.redact(caseData.caseNotes);
@@ -623,7 +633,7 @@ export default function App() {
       const combinedMap = { ...notesMap, ...entityMap };
       const redactedData = { ...caseData, caseNotes: finalRedactedNotes };
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
       
       // Prepare multimodal parts
       const parts: any[] = [
@@ -691,6 +701,10 @@ MULTIMODAL INSTRUCTIONS:
       }
     } catch (err) {
       console.error("Generation error:", err);
+      if (err instanceof Error && err.message.includes('GEMINI_API_KEY')) {
+        setError('AI features are not configured yet. Set GEMINI_API_KEY in your deployment environment and redeploy.');
+        return;
+      }
       setError("Failed to generate report. Please try again.");
     } finally {
       setIsGenerating(false);
