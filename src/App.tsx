@@ -74,6 +74,8 @@ import {
   OperationType
 } from './firebase';
 import { piiService } from './services/piiService';
+import { translateText, supportedLanguages } from './services/translationService';
+import { offlineQueueService } from './services/offlineQueueService';
 
 // --- Types ---
 
@@ -139,6 +141,10 @@ export default function App() {
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [lastActivity, setLastActivity] = useState(Date.now());
+  const [selectedLanguage, setSelectedLanguage] = useState('en');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [syncing, setSyncing] = useState(false);
   
   const reportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -216,6 +222,30 @@ export default function App() {
       return () => unsubscribe();
     }
   }, [user]);
+
+  // Online/Offline listener and Queue Sync
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (user) syncOfflineQueue();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [user]);
+
+  const syncOfflineQueue = async () => {
+    if (!user || syncing) return;
+    setSyncing(true);
+    await offlineQueueService.processQueue(user.uid);
+    setSyncing(false);
+  };
   useEffect(() => {
     if (!user) return;
 
@@ -247,6 +277,20 @@ export default function App() {
     } catch (err) {
       console.error("Login error:", err);
       setError("Failed to sign in. Please try again.");
+    }
+  };
+
+  const handleTranslate = async (langCode: string) => {
+    if (!report) return;
+    setIsTranslating(true);
+    setSelectedLanguage(langCode);
+    try {
+      const translated = await translateText(report, langCode);
+      setReport(translated);
+    } catch (err) {
+      setError("Translation failed. Please try again.");
+    } finally {
+      setIsTranslating(false);
     }
   };
 
@@ -555,6 +599,18 @@ export default function App() {
       return;
     }
 
+    if (!isOnline) {
+      offlineQueueService.addToQueue({
+        reportTitle: caseData.reportTitle,
+        caseNotes: caseData.caseNotes,
+        caseType: caseData.caseType,
+        childInfo: caseData.childInfo,
+        state: caseData.state
+      });
+      setError("You are currently offline. Your notes have been saved locally and will be queued for AI generation once you return to Wi-Fi.");
+      return;
+    }
+
     setIsGenerating(true);
     setError(null);
 
@@ -855,6 +911,10 @@ AI TASKS / WORKFLOW:
               )}
             </nav>
             <div className="hidden md:flex items-center gap-3 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-100">
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700 animate-pulse'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                {isOnline ? (syncing ? 'Syncing...' : 'Online') : 'Offline Mode'}
+              </div>
               <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center overflow-hidden">
                 {user.photoURL ? (
                   <img src={user.photoURL} alt="" className="w-full h-full object-cover" />
@@ -1281,9 +1341,26 @@ AI TASKS / WORKFLOW:
                   className="bg-white rounded-2xl shadow-sm border border-black/5 flex flex-col h-full min-h-[600px]"
                 >
                   <div className="p-4 border-b border-black/5 flex items-center justify-between bg-gray-50/50 rounded-t-2xl">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-emerald-600" />
-                      <h2 className="font-medium">Generated Report</h2>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-emerald-600" />
+                        <h2 className="font-medium">Generated Report</h2>
+                      </div>
+                      <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+                      <div className="hidden sm:flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Translate</span>
+                        <select 
+                          value={selectedLanguage}
+                          onChange={(e) => handleTranslate(e.target.value)}
+                          disabled={isTranslating || !isOnline}
+                          className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs font-medium focus:ring-2 focus:ring-emerald-500/20 outline-none disabled:opacity-50"
+                        >
+                          {supportedLanguages.map(lang => (
+                            <option key={lang.code} value={lang.code}>{lang.name}</option>
+                          ))}
+                        </select>
+                        {isTranslating && <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <button 
