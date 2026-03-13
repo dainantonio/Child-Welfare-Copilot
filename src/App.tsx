@@ -25,8 +25,6 @@ import {
   RotateCcw,
   RotateCw,
   FileJson,
-  ChevronDown,
-  ChevronUp,
   Copy,
   FileDown,
   LogOut,
@@ -111,6 +109,9 @@ interface AttachedFile {
 // --- App Component ---
 
 export default function App() {
+  const REQUEST_TIMEOUT_MS = 45000;
+  const PDF_TIMEOUT_MS = 20000;
+
   const [caseData, setCaseData] = useState<CaseData>({
     reportTitle: '',
     caseNotes: '',
@@ -132,7 +133,6 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [history, setHistory] = useState<string[]>(['']);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState<'caseworker' | 'supervisor' | 'admin'>('caseworker');
   const [currentView, setCurrentView] = useState<'editor' | 'supervisor' | 'admin'>('editor');
@@ -150,6 +150,16 @@ export default function App() {
   const contentRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [footerDialog, setFooterDialog] = useState<'privacy' | 'security' | 'support' | null>(null);
+
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      })
+    ]);
+  };
 
   // Auth listener
   useEffect(() => {
@@ -434,6 +444,7 @@ export default function App() {
       attachments: [],
     };
     setCaseData(example);
+    setReport(null);
     addToHistory(example.caseNotes);
     setError(null);
     setFieldErrors({});
@@ -678,7 +689,11 @@ MULTIMODAL INSTRUCTIONS:
         }
       });
 
-      const response = await model;
+      const response = await withTimeout(
+        model,
+        REQUEST_TIMEOUT_MS,
+        'Report generation timed out. Please try again with shorter notes or fewer attachments.'
+      );
       const rawText = response.text;
       
       if (rawText) {
@@ -703,6 +718,10 @@ MULTIMODAL INSTRUCTIONS:
       console.error("Generation error:", err);
       if (err instanceof Error && err.message.includes('GEMINI_API_KEY')) {
         setError('AI features are not configured yet. Set GEMINI_API_KEY in your deployment environment and redeploy.');
+        return;
+      }
+      if (err instanceof Error && err.message.includes('timed out')) {
+        setError(err.message);
         return;
       }
       setError("Failed to generate report. Please try again.");
@@ -766,37 +785,6 @@ AI TASKS / WORKFLOW:
     document.body.removeChild(element);
   };
 
-  const parseReportSections = (text: string) => {
-    const sections: { title: string; content: string }[] = [];
-    const lines = text.split('\n');
-    let currentSection: { title: string; content: string } | null = null;
-
-    lines.forEach(line => {
-      if (line.startsWith('# ') || line.startsWith('## ') || line.startsWith('### ')) {
-        if (currentSection) sections.push(currentSection);
-        currentSection = { 
-          title: line.replace(/^#+\s+/, ''), 
-          content: '' 
-        };
-      } else if (currentSection) {
-        currentSection.content += line + '\n';
-      } else if (line.trim()) {
-        // Handle content before first header
-        currentSection = { title: 'Introduction', content: line + '\n' };
-      }
-    });
-
-    if (currentSection) sections.push(currentSection);
-    return sections;
-  };
-
-  const toggleSection = (title: string) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [title]: !prev[title]
-    }));
-  };
-
   const wordCount = caseData.caseNotes.trim() ? caseData.caseNotes.trim().split(/\s+/).length : 0;
   const charCount = caseData.caseNotes.length;
 
@@ -814,13 +802,21 @@ AI TASKS / WORKFLOW:
         margin: [15, 15],
         filename: `${safeTitle}_${new Date().toISOString().split('T')[0]}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+        html2canvas: { scale: 1.5, useCORS: true, letterRendering: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       } as any;
 
-      await html2pdf().set(opt).from(element).save();
+      await withTimeout(
+        html2pdf().set(opt).from(element).save(),
+        PDF_TIMEOUT_MS,
+        'PDF generation timed out. Try again after collapsing long sections or downloading TXT.'
+      );
     } catch (err) {
       console.error("PDF generation error:", err);
+      if (err instanceof Error && err.message.includes('timed out')) {
+        setError(err.message);
+        return;
+      }
       setError("Failed to generate PDF. Please try again.");
     } finally {
       setIsDownloading(false);
@@ -1426,23 +1422,11 @@ AI TASKS / WORKFLOW:
                     className="p-8 overflow-y-auto prose prose-sm max-w-none prose-emerald prose-headings:font-semibold prose-headings:tracking-tight prose-p:text-gray-700 prose-li:text-gray-700 flex-grow"
                   >
                     <div className="space-y-4 print:space-y-8">
-                      {parseReportSections(report).map((section, idx) => (
-                        <div key={idx} className="border border-gray-100 rounded-xl overflow-hidden print:border-none print:rounded-none">
-                          <button 
-                            onClick={() => toggleSection(section.title)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left print:hidden"
-                          >
-                            <span className="font-semibold text-gray-900">{section.title}</span>
-                            {expandedSections[section.title] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          </button>
-                          <div className={`p-4 print:block ${expandedSections[section.title] || idx === 0 ? 'block' : 'hidden'}`}>
-                            {idx === 0 && !report.startsWith('#') && (
-                              <h2 className="text-xl font-bold mb-4 print:block hidden">{section.title}</h2>
-                            )}
-                            <ReactMarkdown>{section.content}</ReactMarkdown>
-                          </div>
+                      <div className="border border-gray-100 rounded-xl overflow-hidden print:border-none print:rounded-none">
+                        <div className="p-4">
+                          <ReactMarkdown>{report}</ReactMarkdown>
                         </div>
-                      ))}
+                      </div>
                     </div>
                   </div>
 
@@ -1506,12 +1490,61 @@ AI TASKS / WORKFLOW:
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-400 font-medium uppercase tracking-widest">
           <p>© 2026 Child Welfare Copilot • Cabell County WV</p>
           <div className="flex gap-6">
-            <a href="#" className="hover:text-emerald-600 transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-emerald-600 transition-colors">Security Standards</a>
-            <a href="#" className="hover:text-emerald-600 transition-colors">Support</a>
+            <button type="button" onClick={() => setFooterDialog('privacy')} className="hover:text-emerald-600 transition-colors">Privacy Policy</button>
+            <button type="button" onClick={() => setFooterDialog('security')} className="hover:text-emerald-600 transition-colors">Security Standards</button>
+            <button type="button" onClick={() => setFooterDialog('support')} className="hover:text-emerald-600 transition-colors">Support</button>
           </div>
         </div>
       </footer>
+
+      <AnimatePresence>
+        {footerDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/30 p-4 flex items-center justify-center"
+            onClick={() => setFooterDialog(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {footerDialog === 'privacy' && (
+                <>
+                  <h3 className="text-lg font-semibold mb-3">Privacy Policy</h3>
+                  <p className="text-sm text-gray-600">Case notes are redacted locally before AI processing and audit activity is stored for accountability. Do not include unnecessary PII in attachments.</p>
+                </>
+              )}
+              {footerDialog === 'security' && (
+                <>
+                  <h3 className="text-lg font-semibold mb-3">Security Standards</h3>
+                  <p className="text-sm text-gray-600">Authentication is required for access, role-based permissions are enforced, and sensitive operations are logged with timestamps for supervisor review.</p>
+                </>
+              )}
+              {footerDialog === 'support' && (
+                <>
+                  <h3 className="text-lg font-semibold mb-3">Support</h3>
+                  <p className="text-sm text-gray-600 mb-4">Need help? Contact your agency administrator or email support.</p>
+                  <a href="mailto:support@childwelfarecopilot.local" className="inline-flex items-center gap-2 text-sm text-emerald-700 hover:text-emerald-800 font-medium">
+                    Email Support <ExternalLink className="w-4 h-4" />
+                  </a>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setFooterDialog(null)}
+                className="mt-6 w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2 text-sm font-medium"
+              >
+                Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
