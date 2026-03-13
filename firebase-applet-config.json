@@ -1,8 +1,8 @@
 {
-  "projectId": "child-welfare-copilot-f60e3",
-  "authDomain": "child-welfare-copilot-f60e3.firebaseapp.com",
-  "appId": "1:31188306294:web:8ee477a409edcb91199257",
   "apiKey": "AIzaSyAa2UP26rOrk8jsPZYbNALG83btWq73aO8",
+  "authDomain": "child-welfare-copilot-f60e3.firebaseapp.com",
+  "projectId": "child-welfare-copilot-f60e3",
   "storageBucket": "child-welfare-copilot-f60e3.appspot.com",
   "messagingSenderId": "31188306294",
- }
+  "appId": "1:31188306294:web:8ee477a409edcb91199257"
+}
