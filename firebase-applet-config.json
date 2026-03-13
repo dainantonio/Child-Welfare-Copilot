@@ -1,10 +1,8 @@
 {
-  "projectId": "gen-lang-client-0211696049",
-  "appId": "1:1026707032355:web:5952a32f538540ae642496",
-  "apiKey": "AIzaSyAVk0y7S12u-vNRMv1JZn97hWsXam3fiS0",
-  "authDomain": "gen-lang-client-0211696049.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-b4f220fd-9450-48d1-8127-f8f0abdde1e2",
-  "storageBucket": "gen-lang-client-0211696049.firebasestorage.app",
-  "messagingSenderId": "1026707032355",
-  "measurementId": ""
-}
+  "projectId": "child-welfare-copilot-f60e3",
+  "authDomain": "child-welfare-copilot-f60e3.firebaseapp.com",
+  "appId": "1:31188306294:web:8ee477a409edcb91199257",
+  "apiKey": "AIzaSyAa2UP26rOrk8jsPZYbNALG83btWq73aO8",
+  "storageBucket": "child-welfare-copilot-f60e3.appspot.com",
+  "messagingSenderId": "31188306294",
+ }
